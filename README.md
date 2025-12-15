@@ -4,7 +4,7 @@ MCP-Atlas is a comprehensive benchmark for evaluating AI models' tool-use capabi
 
 - Paper: [LINK TO PAPER - TODO]
 - Leaderboard: [https://scale.com/leaderboard/mcp_atlas](https://scale.com/leaderboard/mcp_atlas)
-- Dataset: [LINK TO HUGGINGFACE/DATASET - TODO]
+- Dataset: [https://huggingface.co/datasets/ScaleAI/MCP-Atlas](https://huggingface.co/datasets/ScaleAI/MCP-Atlas)
 
 ## What is MCP-Atlas?
 MCP-Atlas evaluates how well AI agents can use tools to complete real-world tasks. The benchmark includes:
@@ -166,7 +166,7 @@ Run completions using the HuggingFace dataset (contains 500 tasks):
 ```bash
 uv run python mcp_completion_script.py \
   --model "openai/gpt-4o" \
-  --input_huggingface "bhertz/mcp_dummy" \
+  --input_huggingface "ScaleAI/MCP-Atlas" \
   --output "mcp_eval_4o_results.csv"
 ```
 

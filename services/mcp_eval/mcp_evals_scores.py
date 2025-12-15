@@ -476,14 +476,11 @@ class AsyncLiteLLMClient(AsyncLLMClient):
                 self.request_count += 1
                 
                 # LiteLLM uses OpenAI-compatible format
-                # Request JSON mode (supported by most providers)
+                # Pass response_schema for structured output (Gemini supports this natively)
                 response = await litellm.acompletion(
                     model=self.config.model_name,
-                    messages=[
-                        {"role": "system", "content": "You are a helpful assistant that returns JSON responses matching the requested schema. Always respond with valid JSON only."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    response_format={"type": "json_object"},
+                    messages=[{"role": "user", "content": prompt}],
+                    response_format={"type": "json_object", "response_schema": response_schema},
                     temperature=1 if self.config.model_name == "gpt-5" else temperature, # gpt-5 only supports temperature=1
                     api_key=litellm.api_key,
                     api_base=litellm.api_base if hasattr(litellm, 'api_base') and litellm.api_base else None,
