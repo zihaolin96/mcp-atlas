@@ -1,7 +1,7 @@
 # Makefile for Agent Environment
 
 IMAGE_NAME = agent-environment
-VERSION = 1.2.2
+VERSION = 1.2.3
 
 .PHONY: get_submodules build run run-docker shell test run-mcp-completion
 
