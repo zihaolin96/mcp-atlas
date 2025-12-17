@@ -1,9 +1,10 @@
 # Makefile for Agent Environment
 
 IMAGE_NAME = agent-environment
-VERSION = 1.2.3
+VERSION = 1.2.4
+GHCR_REPO = ghcr.io/scaleapi/mcp-atlas
 
-.PHONY: get_submodules build run run-docker shell test run-mcp-completion
+.PHONY: get_submodules build run run-docker shell test run-mcp-completion push
 
 get_submodules:
 	git submodule update --init
@@ -35,3 +36,15 @@ shell: # shell for agent-environment
 # Note: This runs agent completions (not evaluation/scoring). For scoring, see mcp_evals_scores.py
 run-mcp-completion: 
 	cd services/mcp_eval && uv run python -m mcp_completion.main
+
+# Build and push multi-arch image to ghcr.io
+# Requires Docker, and may not work with Rancher Desktop
+# First do: docker login ghcr.io
+push: get_submodules
+	bash services/agent-environment/dev_scripts/get_submodule_shas.sh > services/agent-environment/data/repos/git_submodule_info.csv
+	@echo "--- Building and pushing multi-arch $(GHCR_REPO):$(VERSION) and :latest ---"
+	cd services/agent-environment && docker buildx build --platform linux/amd64,linux/arm64 \
+		-t $(GHCR_REPO):$(VERSION) \
+		-t $(GHCR_REPO):latest \
+		--push .
+	@echo "✓ Successfully pushed to $(GHCR_REPO):$(VERSION)"
