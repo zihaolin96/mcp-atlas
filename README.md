@@ -17,6 +17,17 @@ MCP-Atlas evaluates how well AI agents can use tools to complete real-world task
 
 ![MCP-Atlas Architecture](assets/architecture-diagram.png)
 
+### Summary of MCP servers and tools
+
+- See the MCP server definitions [`mcp_server_template.json`](services/agent-environment/src/agent_environment/mcp_server_template.json). `uvx` servers can be found at pypi.org and `npx` servers at npmjs.com.
+- All servers should be open source or forked from another open source repo. We at Scale AI did not develop any new MCP servers for MCP-Atlas, and instead used real-world MCP servers.
+- Versions are pinned to ensure they don't change over time, to ensure reproducibility.
+- See the [summary of 36 mcp servers and all 307 tools here](https://gist.github.com/geobio/d0272d41ea395376233f1617a3988860).
+- See sample tool calls in [curl_scripts directory](services/agent-environment/dev_scripts/debug_and_concurrency_tests/curl_scripts). This is the easiest way to directly call the MCP servers via agent-environment service in the docker container.
+- To check what tools are available, you can use this CURL script:  
+`curl -X POST http://localhost:1984/list-tools | jq > list_tools.json ; open list_tools.json`  
+or see the [full tool definition for all 36 servers and 307 tools here](https://gist.github.com/geobio/e1c08cc4d74d96223cb8cf0919a72c3e).
+
 ## Quick Start
 
 This project depends on these CLI tools: [docker](https://www.docker.com/products/docker-desktop/), [uv](https://docs.astral.sh/uv/getting-started/installation/#installation-methods), [jq](https://jqlang.org/download/), and python 3.10+.
@@ -80,10 +91,6 @@ curl -X POST http://localhost:1984/call-tool \
   }' | jq
 ```
 
-Optional: see more sample tool calls in [curl_scripts directory](services/agent-environment/dev_scripts/debug_and_concurrency_tests/curl_scripts).  
-Optional: to check what tools are available, you can use this CURL script:  
-`curl -X POST http://localhost:1984/list-tools | jq > list_tools.json ; open list_tools.json`
-
 ### 3. Start the completion service (in a new terminal)
 
 ```bash
@@ -94,9 +101,7 @@ This starts the MCP completion service on port 3000. It provides an API that con
 
 ### 4. Test with a simple agent completion (in a new terminal)
 
-Test the agentic loop by calling the MCP completion service. The expected answer is "Customer". [Expected response](https://gist.github.com/geobio/0d4fcfb74541d62070db3ae43e48f5ee)
-
-Run this command:
+Test a call the MCP completion service. The expected answer is "Customer". [Expected response](https://gist.github.com/geobio/6e0560846800a1799431c96e64b8254d)
 
 ```bash
 curl -X POST http://localhost:3000/v2/mcp_eval/run_agent \
@@ -126,7 +131,7 @@ uv run python mcp_completion_script.py \
   --output "sample_51_results.csv"
 ```
 
-Results are saved to `completion_results/sample_51_results.csv`. 
+Results are saved to `completion_results/sample_51_results.csv`. On Mac, "Numbers" app works better to open CSV files with multi-line rows.
 
 **Note:** The script automatically skips tasks that are already in the output file. To re-run all tasks, delete or rename the output file first.
 
@@ -142,23 +147,25 @@ Note: For these 10 tasks, they have more servers/tools in "ENABLED_TOOLS", but t
 
 ### 6. Evaluate the results
 
-Make sure `EVAL_LLM_API_KEY` is set in `.env` (from step 1). Defaults to `gemini/gemini-2.5-pro`.
+Make sure `EVAL_LLM_API_KEY` is set in `.env` (from step 1). The evaluator model defaults to `gemini/gemini-2.5-pro`.
 
 ```bash
 uv run mcp_evals_scores.py \
 --input-file="completion_results/sample_51_results.csv" \
---model-name="gpt51"
+--model-label="gpt51"
+
+# model-label here refers to the model in step 5 that we used, and is used for output file naming
 ```
 
 Options:
 - `--input-file` - [required] Path to completion results CSV from step 5
-- `--model-name` - [required] Short name for output files
+- `--model-label` - [required] Short identifier for the model being evaluated from the previous completion step (used in output filenames)
 - `--evaluator-model` - Override model (default: `EVAL_LLM_MODEL` env var or `gemini/gemini-2.5-pro`)
 - `--num-tasks` - Limit to first N tasks
 - `--concurrency` - Concurrent API requests (default: 5)
 
 Outputs saved to `evaluation_results/`:
-- `scored_gpt51.csv` - Coverage scores for each task
+- `scored_gpt51.csv` - Coverage scores for each task. On Mac, "Numbers" app works better to open CSV files with multi-line rows.
 - `coverage_stats_gpt51.csv` - Summary statistics
 - `coverage_histogram_gpt51.png` - Score distribution plot
 
@@ -172,24 +179,31 @@ Approximately 18% of evaluation tasks work with the 20 default servers. To run m
 - e2b-server: 5% | google-workspace: 4%
 
 
-**Important:** Five servers require both API keys AND sample data to be uploaded to your account:
+**Important:** Five servers require both API keys AND sample data to be uploaded to your account. Without this sample data, tasks that use these servers will return erroneous results because they cannot find the expected data.
+
+**See [`data_exports/README.md`](data_exports/README.md) for detailed setup instructions for each service.** 
+
 - **Airtable** - Visit the [shared base](https://airtable.com/appIF9byLfQwdHqE2/shr1KTZOgPl0qQmA8) and click "Copy base"
 - **Google Calendar (google-workspace)** - Import `data_exports/calendar_mcp_eval_export.zip` (8KB)
 - **Notion** - Import `data_exports/notion_mcp_eval_export.zip` (13MB) via Settings > Import
 - **MongoDB** - Restore `data_exports/mongo_dump_video_game_store-UNZIP-FIRST.zip` (486KB) using `mongorestore`
-- **Slack** - Import `data_exports/slack_mcp_eval_export_add100days.zip` (43KB) at your workspace's import page
-
-**See [`data_exports/README.md`](data_exports/README.md) for detailed setup instructions for each service.** Without this sample data, tasks that use these servers will return erroneous results because they cannot find the expected data.
+- **Slack** - Import `data_exports/slack_mcp_eval_export.zip` (43KB) at your workspace's import page
 
 Note: Some services are paid and require billing setup. 
 
-**Note: When you add more API keys to `.env`, you need to restart the server in step 2.** On start, it'll automatically detect what API keys are available, and start those respective MCP servers. After it has restarted, confirm that all expected servers are online. If not online, try restarting the docker container, or check for error logs. `curl -s http://localhost:1984/enabled-servers | jq -c`
+**Note: When you add more API keys to `.env`, you need to restart the server in step 2.** On start, it'll automatically detect what API keys are available, and start those respective MCP servers. After it has restarted, confirm that all expected servers are online. If not online, try restarting the docker container, or check for error logs. 
+
+```bash
+# After adding API keys to .env and restarting the docker container
+
+curl -s http://localhost:1984/enabled-servers | jq -c
+```
 
 If the docker container does not shut down gracefully, use `docker ps` and `docker kill <ID>` to force it to shut down.
 
 ### 8. Evaluate with the full HuggingFace dataset
 
-Run completions using the HuggingFace dataset (contains 500 tasks):
+Run completions using the HuggingFace dataset (contains 500 tasks). If you don't have all API keys, you'll see less than 500 tasks being run.
 
 ```bash
 uv run python mcp_completion_script.py \
@@ -206,7 +220,7 @@ Then evaluate the results:
 ```bash
 uv run mcp_evals_scores.py \
 --input-file="completion_results/mcp_eval_51_results.csv" \
---model-name="gpt51"
+--model-label="gpt51"
 ```
 
 **Note:** Tasks are filtered by default (see step 5). To disable, add `--no-filter`, but we recommend adding missing API keys to `.env` instead.
@@ -224,3 +238,4 @@ See [LiteLLM's supported models](https://docs.litellm.ai/docs/providers) for the
 - **Docker containerization** for consistent MCP server environments
 - **HTTP APIs** for tool calling and listing available tools
 - **Sample debug scripts** in `services/agent-environment/dev_scripts/debug_and_concurrency_tests/curl_scripts/` for directly testing individual MCP servers
+- **Full source code** showing the MCP servers, docker setup, agent-environment, completion service, and eval scoring script.

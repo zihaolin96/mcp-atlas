@@ -8,7 +8,7 @@
 #
 # uv run mcp_evals_scores.py \
 #   --input-file="completion_results/sample_4o_results.csv" \
-#   --model-name="gpt4o" \
+#   --model-label="gpt4o" \
 #   --evaluator-model="gemini/gemini-2.5-pro" \  # optional
 #   --num-tasks=10  # optional
 
@@ -55,7 +55,7 @@ logging.getLogger("LiteLLM").setLevel(logging.WARNING)
 @dataclass
 class EvaluatorConfig:
     """Configuration for the evaluator and analyzer."""
-    model_name: str
+    evaluator_model: str
     semaphore_limit: int
     request_delay: float = 0.2
     verbose: bool = True
@@ -296,140 +296,6 @@ def get_single_claim_evaluation_schema():
         "required": ["claim_text", "coverage_outcome", "justification", "confidence_level"]
     }
 
-# Separate schemas for trajectory comparison components
-def get_diagnosis_schema():
-    """Define the response schema for diagnosis only"""
-    return {
-        "type": "object",
-        "properties": {
-            "primary_failure_mode": {
-                "type": "string",
-                "enum": [
-                    "no_tools_called",
-                    "missing_tool_calls", 
-                    "wrong_tool_selection",
-                    "incorrect_tool_parameters",
-                    "tool_execution_order",
-                    "redundant_tool_calls",
-                    "misunderstood_task",
-                    "partial_task_completion",
-                    "skipped_steps",
-                    "incorrect_conclusion",
-                    "auth_failure",
-                    "capability_discovery_missing",
-                    "env_constraint_violation",
-                    "rate_limit_handling"
-                ]
-            },
-            "secondary_failures": {
-                "type": "array",
-                "items": {
-                    "type": "string",
-                    "enum": [
-                        "no_tools_called",
-                        "missing_tool_calls",
-                        "wrong_tool_selection",
-                        "incorrect_tool_parameters",
-                        "tool_execution_order",
-                        "redundant_tool_calls",
-                        "misunderstood_task",
-                        "partial_task_completion",
-                        "skipped_steps",
-                        "incorrect_conclusion",
-                        "auth_failure",
-                        "capability_discovery_missing",
-                        "env_constraint_violation",
-                        "rate_limit_handling"
-                    ]
-                }
-            },
-            "confidence_score": {
-                "type": "number"
-            },
-            "brief_explanation": {"type": "string"}
-        },
-        "required": ["primary_failure_mode", "secondary_failures", "confidence_score", "brief_explanation"]
-    }
-def get_trajectory_analysis_schema():
-    action = {
-        "type": "object",
-        "properties": {
-            "tool": {"type": "string"},         # make optional by removing from "required" if you want
-            "operation": {"type": "string"},
-            # IMPORTANT: don't use empty OBJECT; use string (you can JSON-dump params here)
-            "parameters": {"type": "string"},
-        },
-        "required": ["tool", "operation", "parameters"],
-    }
-
-    divergence_item = {
-        "type": "object",
-        "properties": {
-            "step_number": {"type": "integer"},
-            "expected_action": action,
-            "actual_action": action,
-            "impact": {"type": "string"},
-            "severity": {"type": "string", "enum": ["critical", "high", "medium", "low"]},
-        },
-        "required": ["step_number", "expected_action", "actual_action", "impact", "severity"],
-    }
-
-    mismatch = {
-        "type": "object",
-        "properties": {
-            "tool": {"type": "string"},
-            "parameter": {"type": "string"},
-            "expected_value": {"type": "string"},
-            "actual_value": {"type": "string"},
-            "consequence": {"type": "string"},
-        },
-        "required": ["tool", "parameter", "expected_value", "actual_value", "consequence"],
-    }
-
-    return {
-        "type": "object",
-        "properties": {
-            "critical_divergence_points": {"type": "array", "items": divergence_item},
-            "missing_tool_calls": {"type": "array", "items": {"type": "string"}},
-            "incorrect_tool_calls": {"type": "array", "items": {"type": "string"}},
-            "parameter_mismatches": {"type": "array", "items": mismatch},
-        },
-        "required": [
-            "critical_divergence_points",
-            "missing_tool_calls",
-            "incorrect_tool_calls",
-            "parameter_mismatches",
-        ],
-    }
-
-
-def get_root_cause_analysis_schema():
-    """Define the response schema for root cause analysis"""
-    return {
-        "type": "object",
-        "properties": {
-            "reasoning_breakdown": {"type": "string"},
-            "causal_chain": {
-                "type": "array",
-                "items": {"type": "string"}
-            },
-            "missed_claims_mapping": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "claim": {"type": "string"},
-                        "root_cause": {"type": "string"},
-                        "fix_required": {"type": "string"}
-                    },
-                    "required": ["claim", "root_cause", "fix_required"]
-                }
-            }
-        },
-        "required": ["reasoning_breakdown", "causal_chain", "missed_claims_mapping"]
-    }
-
-
 # =========================================================================
 # 3. LITELLM CLIENT (Unified Interface for All Providers)
 # =========================================================================
@@ -478,10 +344,10 @@ class AsyncLiteLLMClient(AsyncLLMClient):
                 # LiteLLM uses OpenAI-compatible format
                 # Pass response_schema for structured output (Gemini supports this natively)
                 response = await litellm.acompletion(
-                    model=self.config.model_name,
+                    model=self.config.evaluator_model,
                     messages=[{"role": "user", "content": prompt}],
                     response_format={"type": "json_object", "response_schema": response_schema},
-                    temperature=1 if self.config.model_name == "gpt-5" else temperature, # gpt-5 only supports temperature=1
+                    temperature=1 if self.config.evaluator_model == "gpt-5" else temperature, # gpt-5 only supports temperature=1
                     api_key=litellm.api_key,
                     api_base=litellm.api_base if hasattr(litellm, 'api_base') and litellm.api_base else None,
                 )
@@ -651,7 +517,7 @@ async def evaluate_dataframe_async(df: pd.DataFrame, evaluator: CoverageEvaluato
         try:
             claims = extract_claims(row.get("GTFA_CLAIMS", ""))
             # Determine the correct response column
-            response_col = next((col for col in [f"{evaluator.config.model_name}_response", "script_model_response", "response"] if col in row and pd.notna(row[col])), None)
+            response_col = next((col for col in ["script_model_response", "response"] if col in row and pd.notna(row[col])), None)
             response = row.get(response_col, "") if response_col else ""
             result = await evaluator.evaluate(claims, response)
             return row_idx, result
@@ -688,7 +554,7 @@ async def evaluate_dataframe_async(df: pd.DataFrame, evaluator: CoverageEvaluato
 # 3. STATISTICAL ANALYSIS AND PLOTTING
 # =========================================================================
 
-def generate_statistics_and_plots(scored_csv_path: str, model_name: str, output_dir: str):
+def generate_statistics_and_plots(scored_csv_path: str, model_label: str, output_dir: str):
     """Generates a summary stats CSV and a histogram plot of coverage scores."""
     logger = logging.getLogger(__name__)
     logger.info(f"Step 4: Generating statistics and plots for '{scored_csv_path}'...")
@@ -719,7 +585,7 @@ def generate_statistics_and_plots(scored_csv_path: str, model_name: str, output_
             stats_df.iloc[mean_idx + 1:]
         ]).reset_index(drop=True)
         
-        stats_path = os.path.join(output_dir, f"coverage_stats_{model_name}.csv")
+        stats_path = os.path.join(output_dir, f"coverage_stats_{model_label}.csv")
         stats_df.to_csv(stats_path, index=False)
         logger.info(f"Saved summary statistics to '{stats_path}'")
         print("\nCoverage Score Summary:")
@@ -732,14 +598,14 @@ def generate_statistics_and_plots(scored_csv_path: str, model_name: str, output_
         if len(scores) > 0:
             fig, ax = plt.subplots(figsize=(8, 5))
             ax.hist(scores, bins=min(50, len(scores)), edgecolor="black", alpha=0.7)
-            ax.set_title(f"Coverage Score Distribution ({model_name})")
+            ax.set_title(f"Coverage Score Distribution ({model_label})")
             ax.set_xlabel("Coverage Score")
             ax.set_ylabel("Frequency")
             ax.axvline(scores.mean(), color='red', linestyle='--', label=f'Mean: {scores.mean():.3f}')
             ax.legend()
             plt.tight_layout()
 
-            plot_path = os.path.join(output_dir, f"coverage_histogram_{model_name}.png")
+            plot_path = os.path.join(output_dir, f"coverage_histogram_{model_label}.png")
             plt.savefig(plot_path)
             logger.info(f"Saved histogram plot to '{plot_path}'")
             plt.close(fig)
@@ -752,348 +618,6 @@ def generate_statistics_and_plots(scored_csv_path: str, model_name: str, output_
     except Exception as e:
         logger.error(f"Failed to generate statistics and plots: {e}")
         raise
-
-
-# =========================================================================
-# 4. FAILURE ANALYSIS FRAMEWORK - GEMINI VERSION (SPLIT INTO 3 CALLS)
-# =========================================================================
-
-class LLMTrajectoryComparator:
-    """Uses an LLM to compare trajectories and identify failure modes - split into 3 separate calls."""
-    def __init__(self, config: EvaluatorConfig):
-        self.config = config
-        self.client = AsyncLiteLLMClient(config)
-        self.logger = logging.getLogger(__name__)
-
-    def _get_diagnosis_prompt(self, 
-                             task_id: str,
-                             prompt: str,
-                             expected_trajectory: str,
-                             actual_trajectory: str,
-                             model_response: str,
-                             gtfa_claims: str,
-                             coverage_score: float,
-                             missed_claims: List[Dict]) -> str:
-        return f"""Diagnose the primary failure mode by comparing expected vs actual execution.
-
-FAILURE CATEGORY DEFINITIONS:
-
-TOOL EXECUTION FAILURES:
-- no_tools_called: Model completely failed to invoke any tools despite them being required for the task
-- missing_tool_calls: Model called some tools but omitted critical ones needed for task completion
-- wrong_tool_selection: Model selected inappropriate or incorrect tools for the given task requirements
-- incorrect_tool_parameters: Model used the right tool but with malformed, missing, or incorrect parameters
-- tool_execution_order: Model called tools in wrong sequence, violating dependencies or logical flow
-- redundant_tool_calls: Model made unnecessary repeated calls to the same tool, causing inefficiency
-
-REASONING FAILURES:
-- misunderstood_task: Model fundamentally misinterpreted the task requirements or user intent
-- partial_task_completion: Model understood the task but only completed a subset of requirements
-- skipped_steps: Model omitted critical intermediate operations needed for correct execution
-- incorrect_conclusion: Model followed correct process but arrived at wrong final answer or output
-
-SYSTEM FAILURES:
-- auth_failure: Authentication or authorization errors prevented successful tool execution
-- capability_discovery_missing: Model failed to discover or identify available tools and capabilities
-- env_constraint_violation: Model exceeded rate limits, token limits, or other environmental constraints
-- rate_limit_handling: Model failed to properly handle API throttling or rate limiting responses
-
-CONTEXT:
-Task: {task_id}
-Coverage Score: {coverage_score:.2%}
-
-Number of Missed Claims: {len(missed_claims)}
-
-TRAJECTORIES TO COMPARE:
-Expected: {expected_trajectory[:500]}...
-Actual: {actual_trajectory[:500]}...
-
-Identify the single most critical failure mode that best explains why the model failed to achieve full coverage."""
-
-    def _get_trajectory_analysis_prompt(self,
-                                       expected_trajectory: str,
-                                       actual_trajectory: str,
-                                       missed_claims: List[Dict]) -> str:
-        return f"""Perform detailed trajectory analysis comparing expected vs actual execution paths.
-
-EXPECTED TRAJECTORY:
-{expected_trajectory}
-
-ACTUAL TRAJECTORY:
-{actual_trajectory}
-
-MISSED CLAIMS CONTEXT:
-Total missed: {len(missed_claims)}
-Examples: {json.dumps(missed_claims[:3], indent=2) if missed_claims else "None"}
-
-ANALYSIS TASKS:
-1. Identify critical divergence points where trajectories differ
-2. For each divergence, specify the step number, expected vs actual actions
-3. Assess the severity (critical/high/medium/low) based on impact to task completion
-4. List specific missing tool calls that should have been made
-5. List incorrect tool calls that were made but shouldn't have been
-6. Identify parameter mismatches where the right tool was called with wrong arguments
-
-Focus on technical differences in execution paths, not interpretation."""
-
-    def _get_root_cause_prompt(self,
-                              task: str,
-                              prompt: str,
-                              model_response: str,
-                              gtfa_claims: str,
-                              missed_claims: List[Dict],
-                              diagnosis: Dict,
-                              trajectory_analysis: Dict) -> str:
-        return f"""Analyze the root cause of failures and map them to specific missed claims.
-
-TASK CONTEXT:
-Task: {task}
-Original Prompt: {prompt}
-
-EXPECTED CLAIMS:
-{gtfa_claims}
-
-MISSED CLAIMS:
-{json.dumps(missed_claims, indent=2)}
-
-DIAGNOSIS RESULT:
-Primary Failure: {diagnosis.get('primary_failure_mode', 'unknown')}
-
-TRAJECTORY ANALYSIS SUMMARY:
-Missing Tools: {trajectory_analysis.get('missing_tool_calls', [])}
-Wrong Tools: {trajectory_analysis.get('incorrect_tool_calls', [])}
-Critical Divergences: {len(trajectory_analysis.get('critical_divergence_points', []))} found
-
-ROOT CAUSE ANALYSIS TASKS:
-1. Explain the reasoning breakdown - why did the model fail in its approach?
-2. Trace the causal chain from initial error to final impact (step-by-step progression)
-3. For each missed claim, identify the specific root cause and what fix would address it
-
-Be specific about how trajectory failures led to missed claims."""
-
-    async def get_diagnosis(self,
-                           expected_traj: str,
-                           actual_traj: str,
-                           task: str,
-                           prompt: str,
-                           model_response: str,
-                           gtfa_claims: str,
-                           coverage_score: float,
-                           missed_claims: List[Dict]) -> Dict:
-        """Get diagnosis of primary failure mode"""
-        prompt_text = self._get_diagnosis_prompt(
-            task, prompt, expected_traj, actual_traj,
-            model_response, gtfa_claims, coverage_score, missed_claims
-        )
-        
-        try:
-            result = await self.client.generate_structured_content(
-                prompt=prompt_text,
-                response_schema=get_diagnosis_schema(),
-                temperature=0.0
-            )
-            return result
-        except Exception as e:
-            self.logger.error(f"Diagnosis failed: {e}")
-            return {
-                "primary_failure_mode": "analysis_error",
-                "secondary_failures": [],
-                "confidence_score": 0.1,
-                "brief_explanation": f"Diagnosis failed: {e}"
-            }
-
-    async def get_trajectory_analysis(self,
-                                     expected_traj: str,
-                                     actual_traj: str,
-                                     missed_claims: List[Dict]) -> Dict:
-        """Get detailed trajectory analysis"""
-        prompt_text = self._get_trajectory_analysis_prompt(
-            expected_traj, actual_traj, missed_claims
-        )
-        
-        try:
-            result = await self.client.generate_structured_content(
-                prompt=prompt_text,
-                response_schema=get_trajectory_analysis_schema(),
-                temperature=0.0
-            )
-            return result
-        except Exception as e:
-            self.logger.error(f"Trajectory analysis failed: {e}")
-            return {
-                "critical_divergence_points": [],
-                "missing_tool_calls": [],
-                "incorrect_tool_calls": [],
-                "parameter_mismatches": []
-            }
-
-    async def get_root_cause_analysis(self,
-                                     task: str,
-                                     prompt: str,
-                                     model_response: str,
-                                     gtfa_claims: str,
-                                     missed_claims: List[Dict],
-                                     diagnosis: Dict,
-                                     trajectory_analysis: Dict) -> Dict:
-        """Get root cause analysis"""
-        prompt_text = self._get_root_cause_prompt(
-            task, prompt, model_response, gtfa_claims,
-            missed_claims, diagnosis, trajectory_analysis
-        )
-        
-        try:
-            result = await self.client.generate_structured_content(
-                prompt=prompt_text,
-                response_schema=get_root_cause_analysis_schema(),
-                temperature=0.0
-            )
-            return result
-        except Exception as e:
-            self.logger.error(f"Root cause analysis failed: {e}")
-            return {
-                "reasoning_breakdown": f"Analysis failed: {e}",
-                "causal_chain": [],
-                "missed_claims_mapping": []
-            }
-
-    async def compare_trajectories(self, 
-                                   expected_traj: str, 
-                                   actual_traj: str, 
-                                   task: str, 
-                                   prompt: str,
-                                   model_response: str,
-                                   gtfa_claims: str,
-                                   coverage_details: Dict,
-                                   coverage_score: float) -> Dict:
-        """
-        Compare trajectories with 3 separate API calls for diagnosis, trajectory analysis, and root cause.
-        """
-        
-        # Extract missed claims from coverage details
-        missed_claims = []
-        if coverage_details and isinstance(coverage_details, dict):
-            per_claim = coverage_details.get("per_claim", [])
-            for claim_detail in per_claim:
-                if claim_detail.get("score", 0) < 0.7:
-                    missed_claims.append({
-                        "claim": claim_detail.get("claim", ""),
-                        "justification": claim_detail.get("reason", "Not adequately covered")
-                    })
-        
-        # Make 3 separate API calls
-        diagnosis = await self.get_diagnosis(
-            expected_traj, actual_traj, task, prompt,
-            model_response, gtfa_claims, coverage_score, missed_claims
-        )
-        
-        trajectory_analysis = await self.get_trajectory_analysis(
-            expected_traj, actual_traj, missed_claims
-        )
-        
-        root_cause = await self.get_root_cause_analysis(
-            task, prompt, model_response, gtfa_claims,
-            missed_claims, diagnosis, trajectory_analysis
-        )
-        
-        # Combine results into expected format
-        return {
-            "primary_failure": diagnosis.get("primary_failure_mode", "analysis_error"),
-            "all_failures": diagnosis.get("secondary_failures", []),
-            "confidence": diagnosis.get("confidence_score", 0.5),
-            "specific_issues": [
-                {
-                    "issue": f"Divergence at step {div['step_number']}",
-                    "where": f"Step {div['step_number']}",
-                    "severity": div["severity"]
-                }
-                for div in trajectory_analysis.get("critical_divergence_points", [])
-            ],
-            "tool_param_diffs": [
-                {
-                    "step": f"Step {div['step_number']}",
-                    "expected": div["expected_action"],
-                    "actual": div["actual_action"]
-                }
-                for div in trajectory_analysis.get("critical_divergence_points", [])
-            ],
-            "missing_tools": trajectory_analysis.get("missing_tool_calls", []),
-            "wrong_tools": trajectory_analysis.get("incorrect_tool_calls", []),
-            "reasoning_explanation": root_cause.get("reasoning_breakdown", "Analysis incomplete")
-        }
-
-class EnhancedLLMFailureAnalyzer:
-    """Orchestrates the LLM-based failure analysis."""
-    def __init__(self, df: pd.DataFrame, config: EvaluatorConfig, model_name: str, coverage_threshold: float = 0.7):
-        self.df = df.copy()
-        self.config = config
-        self.model_name = model_name
-        self.coverage_threshold = coverage_threshold
-        self.comparator = LLMTrajectoryComparator(config)
-        self.logger = logging.getLogger(__name__)
-
-    async def analyze(self) -> pd.DataFrame:
-        low_coverage_mask = (self.df['coverage_score'] < self.coverage_threshold) & (self.df['coverage_score'].notna())
-        rows_to_analyze = self.df[low_coverage_mask]
-
-        if rows_to_analyze.empty:
-            self.logger.info("No low-coverage rows to analyze.")
-            return self.df
-
-        self.logger.info(f"Analyzing {len(rows_to_analyze)} rows with coverage < {self.coverage_threshold}...")
-
-        async def analyze_row(idx, row):
-            actual_traj_col = f"{self.model_name}_trajectory"
-            
-            # Parse coverage details from JSON if it's a string
-            coverage_details = {}
-            if 'coverage_details_json' in row and pd.notna(row['coverage_details_json']):
-                try:
-                    coverage_details = json.loads(row['coverage_details_json'])
-                except json.JSONDecodeError:
-                    coverage_details = {}
-            
-            # Get model response column
-            response_col = next((col for col in [f"{self.model_name}_response", "script_model_response", "response"] 
-                                if col in row and pd.notna(row[col])), None)
-            model_response = row.get(response_col, "") if response_col else ""
-            
-            comparison = await self.comparator.compare_trajectories(
-                expected_traj=str(row.get('TRAJECTORY', '')),
-                actual_traj=str(row.get(actual_traj_col, '')),
-                task=str(row.get('TASK', '')),
-                prompt=str(row.get('PROMPT', '')),
-                model_response=model_response,
-                gtfa_claims=str(row.get('GTFA_CLAIMS', '')),
-                coverage_details=coverage_details,
-                coverage_score=row.get('coverage_score', 0)
-            )
-            return idx, comparison
-
-        tasks = [analyze_row(idx, row) for idx, row in rows_to_analyze.iterrows()]
-        results = [await f for f in tqdm(asyncio.as_completed(tasks), total=len(tasks), desc="Analyzing Failures")]
-
-        # Add new columns for all the analysis results
-        self.df['llm_primary_failure'] = pd.NA
-        self.df['llm_all_failures'] = pd.NA
-        self.df['llm_confidence'] = pd.NA
-        self.df['llm_reasoning'] = pd.NA
-        self.df['llm_specific_issues'] = pd.NA
-        self.df['llm_tool_param_diffs'] = pd.NA
-        self.df['llm_missing_tools'] = pd.NA
-        self.df['llm_wrong_tools'] = pd.NA
-
-        for idx, comp_res in results:
-            self.df.loc[idx, 'llm_primary_failure'] = comp_res.get('primary_failure')
-            self.df.loc[idx, 'llm_all_failures'] = json.dumps(comp_res.get('all_failures', []))
-            self.df.loc[idx, 'llm_confidence'] = comp_res.get('confidence')
-            self.df.loc[idx, 'llm_reasoning'] = comp_res.get('reasoning_explanation')
-            self.df.loc[idx, 'llm_specific_issues'] = json.dumps(comp_res.get('specific_issues', []))
-            self.df.loc[idx, 'llm_tool_param_diffs'] = json.dumps(comp_res.get('tool_param_diffs', []))
-            self.df.loc[idx, 'llm_missing_tools'] = json.dumps(comp_res.get('missing_tools', []))
-            self.df.loc[idx, 'llm_wrong_tools'] = json.dumps(comp_res.get('wrong_tools', []))
-            
-        return self.df
-
 
 # =========================================================================
 # 4. MAIN EXECUTION
@@ -1113,13 +637,13 @@ async def main(args):
     os.makedirs(output_dir, exist_ok=True)
     
     # Define file path for scored results
-    scored_path = os.path.join(output_dir, f"scored_{args.model_name}.csv")
+    scored_path = os.path.join(output_dir, f"scored_{args.model_label}.csv")
 
     try:
         # --- Create Evaluator Configuration ---
         logger.info(f"Using evaluator model: {args.evaluator_model}")
         config = EvaluatorConfig(
-            model_name=args.evaluator_model,
+            evaluator_model=args.evaluator_model,
             semaphore_limit=args.concurrency,
             strict_evaluation=True,
             num_tasks=args.num_tasks
@@ -1156,7 +680,7 @@ async def main(args):
         logger.info(f"Evaluation complete. Average coverage: {valid_scores.mean():.3f}")
 
         # 3. Generate statistics and plots
-        generate_statistics_and_plots(scored_path, args.model_name, output_dir)
+        generate_statistics_and_plots(scored_path, args.model_label, output_dir)
 
         logger.info(f"\n🚀 Pipeline finished successfully!")
         logger.info(f"Results available in: {output_dir}")
@@ -1175,8 +699,8 @@ if __name__ == "__main__":
     
     parser.add_argument("--input-file", type=str, required=True, 
                        help="Path to the completion results CSV file containing both ground truth and model outputs.")
-    parser.add_argument("--model-name", type=str, required=True, 
-                       help="Short name for the model being evaluated (e.g., 'gpt4o'). Used for naming output files.")
+    parser.add_argument("--model-label", type=str, required=True, 
+                       help="Short identifier for the model being evaluated (e.g., 'gpt51'). Used in output filenames.")
     parser.add_argument("--evaluator-model", type=str, 
                        default=os.getenv("EVAL_LLM_MODEL", "gemini/gemini-2.5-pro"),
                        help="Model name in LiteLLM format. Default: EVAL_LLM_MODEL env var or 'gemini/gemini-2.5-pro'")

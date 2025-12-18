@@ -19,7 +19,7 @@ import json
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Set, Tuple, Any, Optional
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from collections import defaultdict
 import re
 from difflib import SequenceMatcher
@@ -345,7 +345,7 @@ class AsyncMCPTrajectoryGenerator:
                 # Completion result columns (from script execution) - all lowercase
                 'script_model_response': result.script_model_response,
                 'raw_conversation_history': result.raw_conversation_history,
-                'trajectory': result.trajectory,
+                'trajectory': json.dumps([asdict(tc) for tc in result.trajectory]) if result.trajectory else '[]',
                 'errors': trajectory_errors,
                 'trajectory_time': result.trajectory_time,
                 'num_retry': result.num_retry
