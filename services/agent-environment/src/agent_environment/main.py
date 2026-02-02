@@ -255,11 +255,15 @@ async def clear_cache():
 async def get_enabled_servers() -> dict[str, Any]:
     if KLAVIS_SANDBOX_MODE:
         # In Klavis sandbox mode, return acquired sandbox servers
-        servers = sorted(klavis_sandbox_manager.acquired_sandboxes.keys())
+        # Format matches local mode: list of (name, status) tuples
+        server_names = sorted(klavis_sandbox_manager.acquired_sandboxes.keys())
+        servers = [(name, "OK") for name in server_names]
         return {
             "mode": "klavis_sandbox",
             "servers": servers,
             "total": len(servers),
+            "online": len(servers),
+            "offline": 0,
         }
     else:
         configured = set(config.get("mcpServers", {}).keys())

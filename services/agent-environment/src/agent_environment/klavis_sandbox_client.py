@@ -12,29 +12,29 @@ from .logger import create_logger
 
 logger = create_logger(__name__)
 
-# Configuration from environment
 KLAVIS_API_KEY = os.getenv("KLAVIS_API_KEY", "")
 
-DEFAULT_KLAVIS_MCP_SERVERS = [
+DEFAULT_KLAVIS_MCP_SANDBOXES = [
     "weather",
-    # "twelvedata",
-    # "national_parks",
-    # "lara_translate",
-    # "e2b",
-    # "context7",
-    # "alchemy",
-    # "weights_and_biases",
-    # "huggingface",
-    # "arxiv_latex",
-    # "calculator",
-    # "clinicaltrialsgov",
-    # "met_museum",
-    # "open_library",
-    # "osm",
-    # "pubmed",
-    # "us_weather",
-    # "whois",
-    # "wikipedia",
+    "twelvedata",
+    "national_parks",
+    "lara_translate",
+    "e2b",
+    "context7",
+    "alchemy",
+    "weights_and_biases",
+    "huggingface",
+    "arxiv_latex",
+    "calculator",
+    "clinicaltrialsgov",
+    "met_museum",
+    "open_library",
+    "osm",
+    "pubmed",
+    "us_weather",
+    "whois",
+    "wikipedia",
+    "local_dev", # Note: it will return filesystem/git/terminal/desktop-commander/arxiv/excel/word/powerpoint remote mcp servers
     
     # "github_atlas",
     # "notion",
@@ -54,7 +54,6 @@ DEFAULT_KLAVIS_MCP_SERVERS = [
     # "postgres",
     # "mongodb",
     # "youtube",
-    # "local_dev", # Note: it will return filesystem/git/terminal/desktop-commander/arxiv/excel/word/powerpoint remote mcp servers
     # "local_memory" 
 ]
 
@@ -111,7 +110,7 @@ class KlavisSandboxManager:
 
     async def acquire_all(self) -> None:
         """Acquire sandboxes for all configured servers."""
-        servers = DEFAULT_KLAVIS_MCP_SERVERS.copy()
+        servers = DEFAULT_KLAVIS_MCP_SANDBOXES.copy()
         logger.info(f"Acquiring {len(servers)} Klavis sandbox servers: {servers}")
 
         for server in servers:
