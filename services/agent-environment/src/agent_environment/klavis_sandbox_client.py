@@ -14,8 +14,8 @@ logger = create_logger(__name__)
 
 KLAVIS_API_KEY = os.getenv("KLAVIS_API_KEY", "")
 
-# Server name aliases: maps ground truth trajectory names to Klavis sandbox names
-# Format: {alias_name: actual_klavis_name}
+# maps ground truth names to Klavis sandbox names
+# Format: {ground_truth_server_name: actual_klavis_sandbox_name}
 SERVER_NAME_ALIASES = {
     "osm-mcp-server": "osm",
     "met-museum": "met_museum",
@@ -25,39 +25,44 @@ SERVER_NAME_ALIASES = {
     "lara-translate": "lara_translate",
     "e2b-server": "e2b",
     "cli-mcp-server": "terminal",
-    "memory": "local_memory",
+    "memory": "localmemory",
     "weather-data": "weather",
     "weather": "us_weather",
-    "googleworkspaceatlas": "google_workspace",
+    "google-workspace": "googleworkspaceatlas",
+    "mcp-server-code-runner": "code-runner",
+    "mcp-code-executor": "code-executor",
 }
 
-# Reverse mapping for get_all_server_names to include aliases
+# Reverse mapping for get_all_server_names to include ground truth server names
 REVERSE_SERVER_ALIASES = {v: k for k, v in SERVER_NAME_ALIASES.items()}
 
 DEFAULT_KLAVIS_MCP_SANDBOXES = [
-    "weather",
+    # Default servers that don't require API keys
+    "local_dev", # Note: local_dev sandbox will return filesystem/git/terminal/desktop-commander/arxiv/excel/word/powerpoint/mcp-code-executor/mcp-server-code-runner remote mcp servers
+    "calculator",
+    "clinicaltrialsgov",
     "us_weather",
+    "context7",
+    "met_museum",
+    "localmemory",
+    "open_library",
+    "osm",
+    "pubmed",
+    "wikipedia",
+    
+    # Optional servers that require API keys
+    "weather",
     "twelvedata",
     "national_parks",
     "lara_translate",
     "e2b",
-    "context7",
     "alchemy",
-    "calculator",
-    "clinicaltrialsgov",
-    "met_museum",
-    "open_library",
-    "osm",
-    "pubmed",
-    "whois",
-    "wikipedia",
-    "local_dev", # Note: local_dev sandbox will return filesystem/git/terminal/desktop-commander/arxiv/excel/word/powerpoint/mcp-code-executor/mcp-server-code-runner remote mcp servers
     "github",
     "mongodb",
-    "local_memory",
-    "googleworkspaceatlas" # as per MCP Atlas, this sandbox includes gmail and google calendar tools
+    "googleworkspaceatlas", # as per MCP Atlas, this sandbox includes gmail and google calendar tools
+    "airtable",
+    
     # "notion",
-    # "airtable",
     # "slack",
 ]
 
@@ -254,6 +259,7 @@ class KlavisSandboxMCPClient:
         """
         # Parse server name from tool name (format: servername_toolname)
         if "_" not in tool_name:
+            logger.error(f"Invalid tool name format (missing '_'): {tool_name}")
             raise ValueError(f"Invalid tool name format: {tool_name}")
 
         parts = tool_name.split("_", 1)
@@ -268,9 +274,15 @@ class KlavisSandboxMCPClient:
 
         session = self._sessions.get(server_name)
         if not session:
+            available_servers = list(self._sessions.keys())
+            logger.error(f"No connection to server '{server_name}' for tool '{tool_name}'. Available servers: {available_servers}")
             raise ValueError(f"No connection to server: {server_name}")
 
-        return await session.call_tool(actual_tool_name, arguments)
+        try:
+            return await session.call_tool(actual_tool_name, arguments)
+        except Exception as e:
+            logger.error(f"Tool execution failed - server: '{server_name}', tool: '{actual_tool_name}', args: {arguments}, error: {e}")
+            raise
 
 
 # Global manager instance

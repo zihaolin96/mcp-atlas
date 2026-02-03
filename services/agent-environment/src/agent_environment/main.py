@@ -198,6 +198,7 @@ async def call_tool(
             return result.content
 
         except Exception as e:
+            logger.error(f"Tool call failed - tool: '{request.tool_name}', args: {request.tool_args}, error: {e}")
             raise HTTPException(
                 status_code=500,
                 detail=f"Failed to call tool '{request.tool_name}': {str(e)}",
