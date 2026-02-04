@@ -3,7 +3,6 @@ Klavis Sandbox MCP Client for connecting to remote Klavis sandbox servers.
 Uses StreamableHttp transport to connect to sandbox MCP servers acquired via Klavis API.
 """
 
-import asyncio
 import os
 import httpx
 from mcp import ClientSession
@@ -84,23 +83,19 @@ class KlavisSandboxManager:
             )
         return self._http_client
 
-    async def acquire_sandbox(self, server_name: str) -> dict | None:
-        """Acquire a sandbox for the given server. Returns None on failure."""
+    async def acquire_sandbox(self, server_name: str) -> dict:
+        """Acquire a sandbox for the given server."""
         url = f"{self.KLAVIS_API_URL}/sandbox/{server_name}"
-        body = {"benchmark": "MCP_Atlas"}  # with MCP_Atlas benchmark parameter, Klavis can initialize the environment from data_exports/README.md for you!
+        body = {"benchmark": "MCP_Atlas"} # with MCP_Atlas benchmark parameter, Klavis can initialize the environment from data_exports/README.md for you!
 
-        try:
-            logger.info(f"Acquiring Klavis sandbox for {server_name}...")
-            response = await self.http_client.post(url, json=body if body else None)
-            response.raise_for_status()
+        logger.info(f"Acquiring Klavis sandbox for {server_name}...")
+        response = await self.http_client.post(url, json=body if body else None)
+        response.raise_for_status()
 
-            data = response.json()
-            self.acquired_sandboxes[server_name] = data
-            logger.info(f"Acquired Klavis sandbox {data.get('sandbox_id')} for {server_name}")
-            return data
-        except Exception as e:
-            logger.error(f"Failed to acquire Klavis sandbox for {server_name}: {e}")
-            return None
+        data = response.json()
+        self.acquired_sandboxes[server_name] = data
+        logger.info(f"Acquired Klavis sandbox {data.get('sandbox_id')} for {server_name}")
+        return data
 
     async def release_sandbox(self, server_name: str) -> None:
         """Release a sandbox for the given server."""
@@ -122,16 +117,15 @@ class KlavisSandboxManager:
             self.acquired_sandboxes.pop(server_name, None)
 
     async def acquire_all(self) -> None:
-        """Acquire sandboxes for all configured servers concurrently."""
+        """Acquire sandboxes for all configured servers."""
         servers = DEFAULT_KLAVIS_MCP_SANDBOXES.copy()
-        logger.info(f"Acquiring {len(servers)} Klavis sandbox servers concurrently: {servers}")
+        logger.info(f"Acquiring {len(servers)} Klavis sandbox servers: {servers}")
 
-        # Run all acquisitions in parallel
-        results = await asyncio.gather(*[self.acquire_sandbox(server) for server in servers])
-        
-        # Log summary
-        successful = sum(1 for result in results if result is not None)
-        logger.info(f"Acquired {successful}/{len(servers)} Klavis sandboxes")
+        for server in servers:
+            try:
+                await self.acquire_sandbox(server)
+            except Exception as e:
+                logger.error(f"Failed to acquire Klavis sandbox for {server}: {e}")
 
     async def release_all(self) -> None:
         """Release all acquired sandboxes."""
@@ -181,18 +175,13 @@ class KlavisSandboxMCPClient:
         self._exit_stacks: dict[str, Any] = {}
 
     async def __aenter__(self):
-        """Connect to all acquired sandbox servers concurrently."""
+        """Connect to all acquired sandbox servers."""
         server_urls = self.manager.get_all_server_urls()
-        logger.info(f"Connecting to {len(server_urls)} MCP servers concurrently...")
-        
-        # Run all connections in parallel
-        results = await asyncio.gather(*[
-            self._connect_server(name, url) for name, url in server_urls.items()
-        ])
-        
-        # Log summary
-        successful = sum(results)
-        logger.info(f"Connected to {successful}/{len(server_urls)} MCP servers")
+        for server_name, url in server_urls.items():
+            try:
+                await self._connect_server(server_name, url)
+            except Exception as e:
+                logger.error(f"Failed to connect to {server_name}: {e}")
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -200,38 +189,33 @@ class KlavisSandboxMCPClient:
         for server_name in list(self._sessions.keys()):
             await self._disconnect_server(server_name)
 
-    async def _connect_server(self, server_name: str, url: str) -> bool:
-        """Connect to a single Klavis sandbox MCP server via StreamableHttp. Returns True on success."""
+    async def _connect_server(self, server_name: str, url: str) -> None:
+        """Connect to a single Klavis sandbox MCP server via StreamableHttp."""
         from contextlib import AsyncExitStack
 
         if server_name in self._sessions:
             logger.warning(f"Already connected to {server_name}, skipping connection.")
-            return True
+            return
 
-        try:
-            logger.info(f"Connecting to {server_name} at {url}")
-            exit_stack = AsyncExitStack()
+        logger.info(f"Connecting to {server_name} at {url}")
+        exit_stack = AsyncExitStack()
 
-            await exit_stack.__aenter__()
+        await exit_stack.__aenter__()
 
-            # Create StreamableHttp connection
-            read_stream, write_stream, _ = await exit_stack.enter_async_context(
-                streamablehttp_client(url)
-            )
+        # Create StreamableHttp connection
+        read_stream, write_stream, _ = await exit_stack.enter_async_context(
+            streamablehttp_client(url)
+        )
 
-            # Create and initialize session
-            session = await exit_stack.enter_async_context(
-                ClientSession(read_stream, write_stream)
-            )
-            await session.initialize()
+        # Create and initialize session
+        session = await exit_stack.enter_async_context(
+            ClientSession(read_stream, write_stream)
+        )
+        await session.initialize()
 
-            self._sessions[server_name] = session
-            self._exit_stacks[server_name] = exit_stack
-            logger.info(f"Connected to {server_name}")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to connect to {server_name}: {e}")
-            return False
+        self._sessions[server_name] = session
+        self._exit_stacks[server_name] = exit_stack
+        logger.info(f"Connected to {server_name}")
 
     async def _disconnect_server(self, server_name: str) -> None:
         """Disconnect from a single server."""
